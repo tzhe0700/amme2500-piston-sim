@@ -1,10 +1,9 @@
 # amme2500-piston-sim
 piston simulation with 4 stroke otto cycle and flywheel. 
 
-## Engine Animation
 
 <p align="center">
-  <img src="images/smiling.gif.gif" width="450">
+  <img src="images/smiling.gif" width="450">
 </p>
 
 # Four-Stroke Otto Cycle Piston Engine Simulation
