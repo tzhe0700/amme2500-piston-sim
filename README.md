@@ -1,6 +1,11 @@
 # amme2500-piston-sim
 piston simulation with 4 stroke otto cycle and flywheel. 
-
+TO INSTALL IN TERMINAL:
+git clone https://github.com/tzhe0700/amme2500-piston-sim.git 
+THEN,TYPE
+cd amme2500-piston-sim
+THEN,TYPE
+code .
 
 <p align="center">
   <img src="images/smiling.gif" width="450">
