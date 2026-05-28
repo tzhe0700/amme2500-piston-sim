@@ -47,7 +47,7 @@ c_rot = 0.05
 # -----------------------------
 
 # Set m_flywheel = 0.0 to simulate without a flywheel
-m_flywheel = 5.0       # [kg]
+m_flywheel = 0     # [kg]
 R_flywheel = 0.25      # [m]
 
 # Solid disk flywheel inertia
@@ -702,6 +702,505 @@ anim = FuncAnimation(
     init_func=init,
     interval=frame_interval_ms,
     blit=False
+)
+
+plt.show()
+
+# ============================================================
+# 20. FLYWHEEL PARAMETRIC RESULTS STUDY
+# ============================================================
+# Paste this section at the end of the existing code.
+#
+# This section reruns the model for different flywheel inertias
+# and compares crankshaft angular speed and angular acceleration.
+#
+# For quicker testing, use comparison_t_span = (0.0, 5.0).
+# For final report results, change it to (0.0, 30.0).
+
+comparison_t_span = (0.0, 5.0)
+comparison_t_eval = np.linspace(
+    comparison_t_span[0],
+    comparison_t_span[1],
+    500
+)
+
+# Flywheel inertia values to compare [kg m^2]
+# 0.15625 kg m^2 is your existing 5 kg, 0.25 m radius flywheel.
+I_flywheel_cases = np.array([
+    0.0,
+    0.15625,
+    0.50,
+    1.00,
+    2.00
+])
+
+
+def solve_flywheel_case(I_f_case):
+    """
+    Solve the slider-crank model for one selected flywheel inertia.
+
+    Parameters
+    ----------
+    I_f_case : float
+        Flywheel rotational inertia [kg m^2].
+
+    Returns
+    -------
+    sol_case : OdeResult
+        Numerical solution returned by solve_ivp.
+    omega_case : ndarray
+        Crankshaft angular velocity history [rad/s].
+    alpha_case : ndarray
+        Crankshaft angular acceleration history [rad/s^2].
+    constraint_case : ndarray
+        Maximum position constraint error at each timestep.
+    """
+
+    # Total crankshaft rotational inertia for this case
+    I_total_case = I_crank + I_f_case
+
+    # Rebuild mass matrix for this flywheel inertia
+    M_case = np.diag([
+        m1, m1, I_total_case,     # crank and flywheel
+        m2, m2, I2,               # connecting rod
+        m3, m3                    # piston
+    ])
+
+    W_case = np.linalg.inv(M_case)
+
+    def engine_case(t, state):
+        """
+        Governing equations for this flywheel inertia case.
+        """
+        q, dq = np.split(state, 2)
+
+        # Evaluate constraints and Jacobian terms
+        J_num = np.asarray(J_fn(q, dq), dtype=float)
+        dJ_num = np.asarray(dJ_fn(q, dq), dtype=float)
+
+        C_num = np.asarray(C_fn(q, dq), dtype=float).reshape(-1, 1)
+        dC_num = np.asarray(dC_fn(q, dq), dtype=float).reshape(-1, 1)
+
+        dq_col = dq.reshape(-1, 1)
+
+        # Gravity and crankshaft resistance
+        Q_num = np.asarray(Q_base_fn(q, dq), dtype=float).reshape(-1, 1)
+
+        # Add Otto-cycle gas force to piston vertical coordinate y3
+        F_gas = otto_piston_force(q[2], q[7])
+        Q_num[7, 0] += F_gas
+
+        # Constraint-force matrix using the current flywheel inertia
+        JWJT_case = J_num @ W_case @ J_num.T
+
+        RHS_num = (
+            -dJ_num @ dq_col
+            -J_num @ W_case @ Q_num
+            -(baumgarte_frequency**2) * C_num
+            -2 * baumgarte_damping_ratio * baumgarte_frequency * dC_num
+        )
+
+        # Solve for constraint reactions
+        lam = np.linalg.solve(JWJT_case, RHS_num)
+
+        Q_constraint = J_num.T @ lam
+
+        # Generalised accelerations
+        ddq = W_case @ (Q_num + Q_constraint)
+
+        return np.concatenate((dq, ddq.flatten()))
+
+    # Solve this flywheel case
+    sol_case = solve_ivp(
+        engine_case,
+        comparison_t_span,
+        x0,
+        method='BDF',
+        t_eval=comparison_t_eval,
+        rtol=1e-7,
+        atol=1e-9,
+        max_step=0.02
+    )
+
+    if not sol_case.success:
+        raise RuntimeError(
+            f"Solver failed for flywheel inertia I_f = {I_f_case:.5f} kg m^2"
+        )
+
+    # Crankshaft angular velocity
+    omega_case = sol_case.y[10]
+
+    # Crankshaft angular acceleration.
+    # Index 10 of the derivative corresponds to ddot(theta_1).
+    alpha_case = np.array([
+        engine_case(sol_case.t[i], sol_case.y[:, i])[10]
+        for i in range(len(sol_case.t))
+    ])
+
+    # Position constraint error
+    constraint_case = np.array([
+        np.max(
+            np.abs(
+                np.asarray(
+                    C_fn(sol_case.y[:8, i], sol_case.y[8:, i]),
+                    dtype=float
+                )
+            )
+        )
+        for i in range(len(sol_case.t))
+    ])
+
+    return sol_case, omega_case, alpha_case, constraint_case
+
+
+# -----------------------------
+# 20.1 Run all flywheel cases
+# -----------------------------
+
+case_results = []
+case_data = {}
+
+for I_f_case in I_flywheel_cases:
+
+    sol_case, omega_case, alpha_case, constraint_case = \
+        solve_flywheel_case(I_f_case)
+
+    # Equivalent solid-disk flywheel mass at current radius
+    # I_f = 0.5*m_f*R_f^2  =>  m_f = 2*I_f/R_f^2
+    m_f_case = 2 * I_f_case / R_flywheel**2
+
+    # Angular speed metrics
+    omega_max = np.max(omega_case)
+    omega_min = np.min(omega_case)
+    omega_mean = np.mean(omega_case)
+    delta_omega = omega_max - omega_min
+
+    # Coefficient of speed fluctuation
+    Cs = delta_omega / abs(omega_mean)
+
+    # Angular acceleration metrics
+    alpha_max = np.max(alpha_case)
+    alpha_min = np.min(alpha_case)
+    alpha_abs_max = np.max(np.abs(alpha_case))
+
+    # Numerical validity metric
+    max_constraint_error = np.max(constraint_case)
+
+    case_results.append([
+        I_f_case,
+        m_f_case,
+        omega_max,
+        omega_min,
+        omega_mean,
+        delta_omega,
+        Cs,
+        alpha_max,
+        alpha_min,
+        alpha_abs_max,
+        max_constraint_error
+    ])
+
+    case_data[I_f_case] = {
+        'sol': sol_case,
+        'omega': omega_case,
+        'alpha': alpha_case,
+        'constraint_error': constraint_case
+    }
+
+
+case_results = np.array(case_results)
+
+# Column meanings:
+# 0  = I_f
+# 1  = mass
+# 2  = omega_max
+# 3  = omega_min
+# 4  = omega_mean
+# 5  = delta_omega
+# 6  = Cs
+# 7  = alpha_max
+# 8  = alpha_min
+# 9  = max absolute alpha
+# 10 = max constraint error
+
+
+# -----------------------------
+# 20.2 Percentage reductions
+# -----------------------------
+
+delta_omega_no_flywheel = case_results[0, 5]
+Cs_no_flywheel = case_results[0, 6]
+alpha_no_flywheel = case_results[0, 9]
+
+delta_omega_reduction = (
+    (delta_omega_no_flywheel - case_results[:, 5])
+    / delta_omega_no_flywheel
+) * 100
+
+Cs_reduction = (
+    (Cs_no_flywheel - case_results[:, 6])
+    / Cs_no_flywheel
+) * 100
+
+alpha_reduction = (
+    (alpha_no_flywheel - case_results[:, 9])
+    / alpha_no_flywheel
+) * 100
+
+
+# -----------------------------
+# 20.3 Print results table
+# -----------------------------
+
+print('\n' + '=' * 140)
+print('FLYWHEEL PARAMETRIC STUDY RESULTS')
+print('=' * 140)
+
+print(
+    f"{'I_f [kg m^2]':>13}"
+    f"{'Mass [kg]':>12}"
+    f"{'w_max':>11}"
+    f"{'w_min':>11}"
+    f"{'w_mean':>11}"
+    f"{'Delta w':>12}"
+    f"{'C_s':>11}"
+    f"{'C_s red [%]':>14}"
+    f"{'|alpha|max':>14}"
+    f"{'alpha red [%]':>15}"
+)
+
+print('-' * 140)
+
+for i in range(len(I_flywheel_cases)):
+    print(
+        f"{case_results[i, 0]:13.5f}"
+        f"{case_results[i, 1]:12.3f}"
+        f"{case_results[i, 2]:11.4f}"
+        f"{case_results[i, 3]:11.4f}"
+        f"{case_results[i, 4]:11.4f}"
+        f"{case_results[i, 5]:12.4f}"
+        f"{case_results[i, 6]:11.4f}"
+        f"{Cs_reduction[i]:14.2f}"
+        f"{case_results[i, 9]:14.4f}"
+        f"{alpha_reduction[i]:15.2f}"
+    )
+
+print('=' * 140)
+
+# Warn if any system stalls or reverses
+for i, I_f_case in enumerate(I_flywheel_cases):
+    if case_results[i, 3] <= 0:
+        print(
+            f"Warning: I_f = {I_f_case:.5f} kg m^2 reaches "
+            f"omega_min = {case_results[i, 3]:.4f} rad/s, "
+            f"indicating stalling or reversal."
+        )
+
+
+# -----------------------------
+# 20.4 Save table as CSV
+# -----------------------------
+
+results_to_save = np.column_stack((
+    case_results,
+    delta_omega_reduction,
+    Cs_reduction,
+    alpha_reduction
+))
+
+csv_header = (
+    'I_flywheel_kgm2,'
+    'm_flywheel_kg,'
+    'omega_max_rads,'
+    'omega_min_rads,'
+    'omega_mean_rads,'
+    'delta_omega_rads,'
+    'Cs,'
+    'alpha_max_rads2,'
+    'alpha_min_rads2,'
+    'alpha_abs_max_rads2,'
+    'max_constraint_error,'
+    'delta_omega_reduction_percent,'
+    'Cs_reduction_percent,'
+    'alpha_reduction_percent'
+)
+
+np.savetxt(
+    'flywheel_parametric_results.csv',
+    results_to_save,
+    delimiter=',',
+    header=csv_header,
+    comments='',
+    fmt='%.8e'
+)
+
+
+# -----------------------------
+# 20.5 Angular velocity comparison
+# -----------------------------
+
+plt.figure(figsize=(10, 5))
+
+for I_f_case in I_flywheel_cases:
+    plt.plot(
+        case_data[I_f_case]['sol'].t,
+        case_data[I_f_case]['omega'],
+        label=rf'$I_f={I_f_case:.3f}$ kg m$^2$'
+    )
+
+plt.xlabel('Time [s]')
+plt.ylabel(r'Crank angular velocity $\dot{\theta}_1$ [rad/s]')
+plt.title('Effect of Flywheel Inertia on Crankshaft Angular Speed')
+plt.grid()
+plt.legend()
+plt.tight_layout()
+
+plt.savefig(
+    'flywheel_angular_velocity_comparison.png',
+    dpi=300,
+    bbox_inches='tight'
+)
+
+plt.show()
+
+
+# -----------------------------
+# 20.6 Zoomed angular velocity comparison
+# -----------------------------
+
+plt.figure(figsize=(10, 5))
+
+for I_f_case in I_flywheel_cases:
+    plt.plot(
+        case_data[I_f_case]['sol'].t,
+        case_data[I_f_case]['omega'],
+        label=rf'$I_f={I_f_case:.3f}$ kg m$^2$'
+    )
+
+plt.xlim(0, comparison_t_span[1])
+plt.xlabel('Time [s]')
+plt.ylabel(r'Crank angular velocity $\dot{\theta}_1$ [rad/s]')
+plt.title('Crankshaft Angular Speed Comparison')
+plt.grid()
+plt.legend()
+plt.tight_layout()
+
+plt.savefig(
+    'flywheel_angular_velocity_comparison_zoomed.png',
+    dpi=300,
+    bbox_inches='tight'
+)
+
+plt.show()
+
+
+# -----------------------------
+# 20.7 Angular acceleration comparison
+# -----------------------------
+
+plt.figure(figsize=(10, 5))
+
+for I_f_case in I_flywheel_cases:
+    plt.plot(
+        case_data[I_f_case]['sol'].t,
+        case_data[I_f_case]['alpha'],
+        label=rf'$I_f={I_f_case:.3f}$ kg m$^2$'
+    )
+
+plt.xlabel('Time [s]')
+plt.ylabel(r'Crank angular acceleration $\ddot{\theta}_1$ [rad/s$^2$]')
+plt.title('Effect of Flywheel Inertia on Angular Acceleration')
+plt.grid()
+plt.legend()
+plt.tight_layout()
+
+plt.savefig(
+    'flywheel_angular_acceleration_comparison.png',
+    dpi=300,
+    bbox_inches='tight'
+)
+
+plt.show()
+
+
+# -----------------------------
+# 20.8 Coefficient of speed fluctuation graph
+# -----------------------------
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    case_results[:, 0],
+    case_results[:, 6],
+    marker='o'
+)
+
+plt.xlabel(r'Flywheel inertia $I_f$ [kg m$^2$]')
+plt.ylabel(r'Coefficient of speed fluctuation $C_s$')
+plt.title('Coefficient of Speed Fluctuation Against Flywheel Inertia')
+plt.grid()
+plt.tight_layout()
+
+plt.savefig(
+    'coefficient_of_speed_fluctuation_vs_inertia.png',
+    dpi=300,
+    bbox_inches='tight'
+)
+
+plt.show()
+
+
+# -----------------------------
+# 20.9 Peak angular acceleration graph
+# -----------------------------
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    case_results[:, 0],
+    case_results[:, 9],
+    marker='o'
+)
+
+plt.xlabel(r'Flywheel inertia $I_f$ [kg m$^2$]')
+plt.ylabel(r'Maximum $|\ddot{\theta}_1|$ [rad/s$^2$]')
+plt.title('Peak Angular Acceleration Against Flywheel Inertia')
+plt.grid()
+plt.tight_layout()
+
+plt.savefig(
+    'peak_angular_acceleration_vs_inertia.png',
+    dpi=300,
+    bbox_inches='tight'
+)
+
+plt.show()
+
+
+# -----------------------------
+# 20.10 Constraint error comparison
+# -----------------------------
+
+plt.figure(figsize=(10, 5))
+
+for I_f_case in I_flywheel_cases:
+    plt.semilogy(
+        case_data[I_f_case]['sol'].t,
+        np.maximum(case_data[I_f_case]['constraint_error'], 1e-16),
+        label=rf'$I_f={I_f_case:.3f}$ kg m$^2$'
+    )
+
+plt.xlabel('Time [s]')
+plt.ylabel('Maximum absolute constraint error')
+plt.title('Numerical Constraint Error for Flywheel Cases')
+plt.grid()
+plt.legend()
+plt.tight_layout()
+
+plt.savefig(
+    'flywheel_constraint_error_comparison.png',
+    dpi=300,
+    bbox_inches='tight'
 )
 
 plt.show()
