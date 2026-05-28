@@ -1,0 +1,22 @@
+Measure,No flywheel,Selected flywheel
+Time of largest recorded speed [s],0.44,28.48
+Largest recorded speed [rad/s],10.594831040343571,8.265581162915803
+Estimated settling time [s],nan,nan
+Final cycle start time [s],27.327435235444867,28.009683252346754
+Final cycle maximum speed [rad/s],10.094514947349502,8.265211915822404
+Final cycle minimum speed [rad/s],2.2202589742860876,4.869323735928172
+Final cycle mean speed [rad/s],6.109812891573948,6.527257279213147
+Final cycle speed variation [rad/s],7.8742559730634145,3.3958881798942313
+Coefficient of speed fluctuation C_s,1.2887883987286768,0.5202626516207435
+Maximum |angular acceleration| [rad/s^2],23.653358752361406,11.225768822597573
+Maximum |gas force| [N],77.59074605418628,77.2154926371061
+Maximum |gas torque| [N m],12.765652249522285,12.777970330129472
+Maximum |resisting torque| [N m],1.0094514947349502,0.8265211915822404
+Rotational energy variation [J],24.24242833391144,33.452561862005126
+Maximum joint A reaction [N],128.75657978760208,95.16887793949876
+Maximum joint B reaction [N],80.75677200988014,74.21972841300564
+Maximum constraint error,4.553266352608732e-08,4.342102110706932e-08
+Reduction in final-cycle speed variation [%],,56.873535842484316
+Reduction in coefficient of speed fluctuation [%],,59.6316468914559
+Reduction in peak |angular acceleration| [%],,52.54048720891758
+Reduction in peak joint A reaction [%],,26.08620227681558

@@ -1,0 +1,3 @@
+I_flywheel_kgm2,peak_time_s,global_peak_speed_rads,omega_max_cycle_rads,omega_min_cycle_rads,omega_mean_cycle_rads,delta_omega_cycle_rads,Cs,alpha_abs_max_cycle_rads2,tau_gas_max_cycle_Nm,tau_load_abs_max_cycle_Nm,delta_rotational_energy_cycle_J,reaction_A_max_cycle_N,reaction_B_max_cycle_N,max_constraint_error_m
+0.00000000e+00,2.96400000e+01,1.48730855e+01,1.47966462e+01,1.04247426e+01,1.20832214e+01,4.37190362e+00,3.61816065e-01,3.89157707e+01,1.24121006e+01,7.39832311e-01,2.75663702e+01,2.45791469e+02,5.25910842e+01,1.15743488e-07
+1.00000000e+00,2.94200000e+01,1.13582111e+01,1.12509970e+01,9.02196601e+00,9.90641894e+00,2.22903104e+00,2.25008760e-01,1.54546538e+01,1.25843126e+01,5.62549852e-01,3.38917979e+01,1.53447996e+02,5.18556803e+01,7.04021159e-08
