@@ -42,7 +42,7 @@ SETTLING_MEAN_TOL = 0.01         # 1% tolerance on cycle mean speed
 SETTLING_RIPPLE_TOL = 0.03       # 3% tolerance on cycle speed variation
 MIN_SETTLED_CYCLES = 5
 
-MAKE_ANIMATION = True          # Change to True to show selected-case animation
+MAKE_ANIMATION = False         # Change to True to show selected-case animation
 ANIMATION_DURATION = 8.0         # [s]
 ANIMATION_FRAME_SKIP = 4
 
@@ -603,7 +603,167 @@ plt.legend()
 save_show('09_constraint_error.png')
 
 # ============================================================
-# 14. OPTIONAL ANIMATION OF SELECTED FLYWHEEL CASE
+# 14. TIME-STEP CONVERGENCE STUDY: SELECTED FLYWHEEL CASE
+# ============================================================
+# The principal convergence quantity is the coefficient of speed
+# fluctuation, C_s, calculated over the final complete 720-degree
+# Otto cycle for the selected flywheel case.
+
+CONVERGENCE_SETTINGS = [
+    (0.1000, 0.0400),     # (maximum solver step, output time step)
+    (0.0500, 0.0200),
+    (0.0250, 0.0100),
+    (0.0125, 0.0050)
+]
+
+
+def run_convergence_case(case, max_step_case, output_time_step_case):
+    """
+    Rerun the selected flywheel case at a specified numerical resolution
+    and calculate final-cycle flywheel performance metrics.
+    """
+
+    rhs, evaluate = build_dynamics(case['inertia'])
+
+    t_eval = np.arange(
+        0.0,
+        SIMULATION_END_TIME + output_time_step_case / 2,
+        output_time_step_case
+    )
+
+    sol = solve_ivp(
+        rhs,
+        (0.0, SIMULATION_END_TIME),
+        x0,
+        method='BDF',
+        t_eval=t_eval,
+        rtol=1e-7,
+        atol=1e-9,
+        max_step=max_step_case
+    )
+
+    if not sol.success:
+        raise RuntimeError(
+            f"Convergence run failed for max_step = {max_step_case:.4f} s: "
+            f"{sol.message}"
+        )
+
+    theta = sol.y[2]
+    omega = sol.y[10]
+
+    # Find the last complete 720-degree Otto cycle.
+    total_rotation = theta[-1] - np.pi / 2
+    number_complete_cycles = int(np.floor(total_rotation / (4 * np.pi)))
+
+    if number_complete_cycles < 1:
+        raise RuntimeError('No complete Otto cycle found in convergence run.')
+
+    final_cycle_number = number_complete_cycles - 1
+    theta_start = np.pi / 2 + final_cycle_number * 4 * np.pi
+    theta_grid = theta_start + np.linspace(0.0, 4 * np.pi, PHASE_POINTS)
+
+    # Interpolate all resolutions to the same one-degree crank-angle grid.
+    omega_cycle = np.interp(theta_grid, theta, omega)
+    time_cycle = np.interp(theta_grid, theta, sol.t)
+
+    # Calculate angular acceleration across the same final cycle.
+    alpha = np.array([
+        evaluate(sol.t[i], sol.y[:, i])[0][10]
+        for i in range(len(sol.t))
+    ])
+    alpha_cycle = np.interp(theta_grid, theta, alpha)
+
+    duration = time_cycle[-1] - time_cycle[0]
+    omega_max = np.max(omega_cycle)
+    omega_min = np.min(omega_cycle)
+    omega_mean = 4 * np.pi / duration
+    delta_omega = omega_max - omega_min
+    Cs = delta_omega / omega_mean
+    alpha_max_abs = np.max(np.abs(alpha_cycle))
+
+    return {
+        'max_step': max_step_case,
+        'output_step': output_time_step_case,
+        'delta_omega': delta_omega,
+        'Cs': Cs,
+        'alpha_max_abs': alpha_max_abs
+    }
+
+
+convergence_results = [
+    run_convergence_case(SELECTED_FLYWHEEL, max_step, output_step)
+    for max_step, output_step in CONVERGENCE_SETTINGS
+]
+
+# Finest time-step case is used as the reference solution.
+Cs_reference = convergence_results[-1]['Cs']
+
+for item in convergence_results:
+    item['Cs_difference_percent'] = (
+        abs(item['Cs'] - Cs_reference) / abs(Cs_reference) * 100
+    )
+
+print('\n' + '=' * 110)
+print('TIME-STEP CONVERGENCE STUDY: SELECTED FLYWHEEL CASE')
+print('=' * 110)
+print(
+    f"{'Max step [s]':>14}"
+    f"{'Output step [s]':>18}"
+    f"{'Delta omega [rad/s]':>23}"
+    f"{'C_s':>14}"
+    f"{'Max |alpha| [rad/s^2]':>25}"
+    f"{'C_s diff [%]':>17}"
+)
+print('-' * 110)
+
+for item in convergence_results:
+    print(
+        f"{item['max_step']:14.4f}"
+        f"{item['output_step']:18.4f}"
+        f"{item['delta_omega']:23.6f}"
+        f"{item['Cs']:14.6f}"
+        f"{item['alpha_max_abs']:25.6f}"
+        f"{item['Cs_difference_percent']:17.6f}"
+    )
+
+print('=' * 110)
+
+with (OUTPUT_DIR / 'convergence_study_results.csv').open('w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow([
+        'Maximum solver step [s]',
+        'Output time step [s]',
+        'Delta omega [rad/s]',
+        'Coefficient of speed fluctuation Cs',
+        'Maximum absolute angular acceleration [rad/s^2]',
+        'Cs difference from finest case [%]'
+    ])
+    for item in convergence_results:
+        writer.writerow([
+            item['max_step'],
+            item['output_step'],
+            item['delta_omega'],
+            item['Cs'],
+            item['alpha_max_abs'],
+            item['Cs_difference_percent']
+        ])
+
+plt.figure(figsize=(8, 5))
+plt.plot(
+    [item['max_step'] for item in convergence_results],
+    [item['Cs'] for item in convergence_results],
+    marker='o'
+)
+plt.gca().invert_xaxis()
+plt.xlabel('Maximum solver step [s]')
+plt.ylabel(r'Coefficient of speed fluctuation $C_s$')
+plt.title('Convergence of Coefficient of Speed Fluctuation')
+plt.grid()
+save_show('10_convergence_of_Cs.png')
+
+
+# ============================================================
+# 15. OPTIONAL ANIMATION OF SELECTED FLYWHEEL CASE
 # ============================================================
 class Box:
     def __init__(self, width, height):
